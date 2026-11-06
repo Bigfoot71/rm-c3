@@ -1,0 +1,48 @@
+{
+  "provides": "rlp",
+  "targets": {
+	"macos-x64": {
+	  "link-args": [],
+	  "dependencies": [],
+	  "linked-libraries": []
+	},
+	"macos-aarch64": {
+	  "link-args": [],
+	  "dependencies": [],
+	  "linked-libraries": []
+	},
+	"linux-x64": {
+	  "link-args": [],
+	  "dependencies": [],
+	  "linked-libraries": []
+	},
+	"linux-aarch64": {
+	  "link-args": [],
+	  "dependencies": [],
+	  "linked-libraries": []
+	},
+	"freebsd-x64": {
+	  "link-args": [],
+	  "dependencies": [],
+	  "linked-libraries": []
+	},
+	"windows-x64": {
+	  "dependencies": [],
+	  "linked-libraries": [],
+	  "wincrt": "none"
+	},
+	"windows-aarch64": {
+	  "dependencies": [],
+	  "linked-libraries": [],
+	  "wincrt": "none"
+	},
+	"wasm32": {
+	  "dependencies": [],
+	  "linked-libraries": []
+	},
+	"emscripten": {
+	  "dependencies": [],
+	  "linked-libraries": []
+	}
+  }
+}
