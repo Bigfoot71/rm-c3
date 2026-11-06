@@ -18,8 +18,8 @@ fn RmV3 linear_to_srgb(RmV3 color) @inline @feat(RM_SRGB_OUTPUT)
 fn RmV3 debanding(RmF x, RmF y, RmV3 color) @inline @feat(RM_DEBANDING)
 {
 	const RmF DITHER_STRENGTH = 1.0f / 255.0f;
-	RmF d = (ign(x, y) - 0.5f) * DITHER_STRENGTH;
-	return { color.x + d, color.y + d, color.z + d };
+
+	return color + (ign(x, y) - 0.5f) * DITHER_STRENGTH;;
 }
 
 // ================================
