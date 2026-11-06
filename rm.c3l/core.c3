@@ -3,7 +3,7 @@ module rm;
 import std::math;
 
 // ================================
-// Public: Context Constants
+// Public: Core Constants
 // ================================
 
 const bool RM_SRGB_OUTPUT = $feat(RM_SRGB_OUTPUT);
@@ -12,23 +12,28 @@ const bool RM_THREADED    = $feat(RM_THREADED);
 const bool RM_ANAA        = $feat(RM_ANAA);
 const bool RM_TAA         = $feat(RM_TAA);
 
-const int TILE       = 16;
-const int THREADS    = env::WASM ? 5 : 0; // 0 = one per logical CPU
-const int CACHE_LINE = 64;                // Color buffer alignment take a cache line so two threads never write the same one
+// ================================
+// Private: Core Constants
+// ================================
 
-const float BEAM_SAFETY  = 0.98f;
+const int LANES       @private = 8;
+const int TILE        @private = 16;
+const int THREADS     @private = env::WASM ? 5 : 0; // 0 = one per logical CPU
+const int CACHE_LINE  @private = 64;                // Color buffer alignment take a cache line so two threads never write the same one
+
+const float BEAM_SAFETY @private = 0.98f;
 
 $assert TILE % LANES == 0 : "TILE must be a multiple of LANES";
 
 // ================================
-// Public: Context Definitions
+// Public: Core Definitions
 // ================================
 
 alias RmShadeFn = fn RmV3(RmRays ray, RmHits hits, float cone);
 alias RmSceneFn = fn RmSd(RmV3 p);
 
 // ================================
-// Public: Context Functions
+// Public: Core Functions
 // ================================
 
 fn void init(int w, int h)
@@ -271,7 +276,7 @@ fn void tile_item(void* arg, int item) @local
 }
 
 // ================================
-// Local: Raymarcher Context
+// Local: Core Context
 // ================================
 
 struct Context @local

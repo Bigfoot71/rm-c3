@@ -15,8 +15,6 @@ const HALF_PI = math::HALF_PI;
 // Public: Lane Types
 // ================================
 
-const int LANES @private = 8;
-
 alias RmF = float [<LANES>]; // one float per lane
 alias RmI = int   [<LANES>]; // one int per lane
 alias RmM = bool  [<LANES>]; // one bool per lane (comparison result)
