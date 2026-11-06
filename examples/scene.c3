@@ -124,7 +124,7 @@ fn int main(String[] args)
 	{
 		camera.orbit({ 0.0f, 0.8f, 0.0f }, rl::get_frame_time() * 0.4f, 0.0f);
 
-		char[<4>][] colors = rm::render(camera, &shade, &scene);
+		char[<4>][] colors = rm::render(camera, &scene, &shade);
 		rt.update(colors.ptr);
 
 		rl::@drawing()

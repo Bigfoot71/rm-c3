@@ -66,7 +66,7 @@ fn void quit()
 	mem::free(ctx.beam);
 }
 
-fn char[<4>][] render(RmCamera camera, RmShadeFn shade, RmSceneFn scene, int max_steps = 128, float eps = 0.0005f, float omega0 = 1.6f)
+fn char[<4>][] render(RmCamera camera, RmSceneFn scene, RmShadeFn shade, int max_steps = 128, float eps = 0.0005f, float omega0 = 1.6f)
 {
 	float tan_half = camera.tan_half();
 
