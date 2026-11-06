@@ -122,7 +122,10 @@ fn int main(String[] args)
 
 	while (!rl::window_should_close())
 	{
-		camera.orbit({ 0.0f, 0.8f, 0.0f }, rl::get_frame_time() * 0.4f, 0.0f);
+		if (!rl::is_mouse_button_down(LEFT))
+		{
+			camera.orbit({ 0.0f, 0.8f, 0.0f }, rl::get_frame_time() * 0.4f, 0.0f);
+		}
 
 		char[<4>][] colors = rm::render(camera, &scene, &shade);
 		rt.update(colors.ptr);
