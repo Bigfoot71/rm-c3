@@ -129,6 +129,15 @@ fn void reset_history() @inline
 	$endif
 }
 
+// motion:    0 = no AA while the camera moves, 1 = full accumulation (ghosting)
+// stability: 1 = converges perfectly at rest (static scene), 0 = keeps rejecting changes (animated scene)
+fn void set_taa(float motion, float stability) @inline
+{
+	$if RM_TAA:
+		taa_configure(motion, stability);
+	$endif
+}
+
 // ================================
 // Local: Frame Functions
 // ================================
