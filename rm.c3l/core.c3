@@ -270,7 +270,7 @@ fn void tile_item(void* arg, int item) @local
 			$endif
 
 			$if RM_TAA:
-				taa_store(x, y, color);
+				taa_store(x, y, color, hits.dist * rays.dir.dot(ctx.fwd));
 			$else
 				$if RM_SRGB_OUTPUT:
 					color = linear_to_srgb(color);
