@@ -68,9 +68,7 @@ fn Vec2 taa_jitter() @inline
 fn void taa_prepare(RmCamera camera)
 {
 	// The history written last frame is read this frame
-	float[<4>][] tmp = ctx.hist;
-	ctx.hist         = ctx.hist_prev;
-	ctx.hist_prev    = tmp;
+	@swap(ctx.hist, ctx.hist_prev);
 
 	float tan_half = camera.tan_half();
 
