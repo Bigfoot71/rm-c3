@@ -18,29 +18,28 @@ struct RmSd
 
 fn RmSd sd_sphere(RmV3 p, float r) @inline
 {
-	return to_sd(p.length() - (RmF)r);
+	return to_sd(p.length() - r);
 }
 
 fn RmSd sd_box(RmV3 p, Vec3 half) @inline
 {
-	RmV3 q = p.abs() - v3_from(half);
-	return to_sd(box3(q.x, q.y, q.z));
+	return to_sd(box3(p.abs() - v3_from(half)));
 }
 
 fn RmSd sd_round_box(RmV3 p, Vec3 half, float r) @inline
 {
-	RmV3 q = p.abs() - v3_from(half - (Vec3){ r, r, r });
-	return to_sd(box3(q.x, q.y, q.z) - (RmF)r);
+	RmV3 q = p.abs() - (v3_from(half) - r);
+	return to_sd(box3(q) - r);
 }
 
 fn RmSd sd_plane(RmV3 p, Vec3 n, float h) @inline
 {
-	return to_sd(p.dot(v3_from(n)) + (RmF)h);
+	return to_sd(p.dot(v3_from(n)) + h);
 }
 
 fn RmSd sd_plane_y(RmV3 p, float height) @inline
 {
-	return to_sd(p.y - (RmF)height);
+	return to_sd(p.y - height);
 }
 
 fn RmSd sd_capsule(RmV3 p, Vec3 a, Vec3 b, float r) @inline
@@ -48,34 +47,36 @@ fn RmSd sd_capsule(RmV3 p, Vec3 a, Vec3 b, float r) @inline
 	Vec3  ba     = b - a;
 	float inv_bb = 1.0f / ba.dot(ba);
 
-	RmV3 pa = p - v3_from(a);
-	RmF  h  = saturate(pa.dot(v3_from(ba)) * inv_bb);
+	RmV3 vba = v3_from(ba);
+	RmV3 pa  = p.at(a);
+	RmF  h   = saturate(pa.dot(vba) * inv_bb);
 
-	return to_sd((pa - v3_from(ba) * h).length() - (RmF)r);
+	return to_sd((pa - vba * h).length() - r);
 }
 
 fn RmSd sd_torus(RmV3 p, Vec2 t) @inline
 {
-	return to_sd(len2(len2(p.x, p.z) - (RmF)t.x, p.y) - (RmF)t.y);
+	RmV2 q = { p.xz().length() - t.x, p.y };
+	return to_sd(q.length() - t.y);
 }
 
 fn RmSd sd_capped_cylinder(RmV3 p, float r, float h) @inline
 {
-	return to_sd(rect2(len2(p.x, p.z) - (RmF)r, math::abs(p.y) - (RmF)h));
+	return to_sd(rect2({ p.xz().length() - r, math::abs(p.y) - h }));
 }
 
 fn RmSd sd_cylinder(RmV3 p, Vec3 c) @inline
 {
-	return to_sd(len2(p.x - (RmF)c.x, p.z - (RmF)c.y) - (RmF)c.z);
+	return to_sd((p.xz() - v2(c.x, c.y)).length() - c.z);
 }
 
 fn RmSd sd_ellipsoid(RmV3 p, Vec3 r) @inline
 {
-	Vec3 inv  = { 1.0f / r.x, 1.0f / r.y, 1.0f / r.z };
-	Vec3 inv2 = { inv.x * inv.x, inv.y * inv.y, inv.z * inv.z };
+	Vec3 inv  = 1.0f / r;
+	Vec3 inv2 = inv * inv;
 
-	RmF k0 = p.mul(v3_from(inv)).length();
-	RmF k1 = p.mul(v3_from(inv2)).length();
+	RmF k0 = (p * v3_from(inv)).length();
+	RmF k1 = (p * v3_from(inv2)).length();
 	return to_sd(k0 * (k0 - 1.0f) / k1);
 }
 
@@ -87,65 +88,61 @@ fn RmSd sd_cone(RmV3 p, Vec2 c, float h) @inline
 	float inv_qx = 1.0f / qx;
 	float k      = sgnf(qy);
 
-	RmF wx = len2(p.x, p.z);
-	RmF wy = p.y;
+	RmV2 q = v2(qx, qy);
+	RmV2 w = { p.xz().length(), p.y };
 
-	RmF t  = saturate((wx * qx + wy * qy) * inv_qq);
-	RmF ax = wx - t * qx;
-	RmF ay = wy - t * qy;
+	RmF  t = saturate(w.dot(q) * inv_qq);
+	RmV2 a = w - q * t;
 
-	RmF u  = saturate(wx * inv_qx);
-	RmF bx = wx - u * qx;
-	RmF by = wy - qy;
+	RmF  u = saturate(w.x * inv_qx);
+	RmV2 b = { w.x - u * qx, w.y - qy };
 
-	RmF d = math::min(ax * ax + ay * ay, bx * bx + by * by);
-	RmF s = math::max((wx * qy - wy * qx) * k, (wy - qy) * k);
+	RmF d = math::min(a.length_sq(), b.length_sq());
+	RmF s = math::max(w.cross(q) * k, (w.y - qy) * k);
 
 	return to_sd(math::sqrt(d) * sgn(s));
 }
 
 fn RmSd sd_capped_cone(RmV3 p, float h, float r1, float r2) @inline
 {
-	float k1x   = r2;
-	float k1y   = h;
-	float k2x   = r2 - r1;
-	float k2y   = 2.0f * h;
-	float inv_k = 1.0f / (k2x * k2x + k2y * k2y);
+	Vec2  k1    = { r2, h };
+	Vec2  k2    = { r2 - r1, 2.0f * h };
+	float inv_k = 1.0f / k2.dot(k2);
 
-	RmF qx = len2(p.x, p.z);
-	RmF qy = p.y;
+	RmV2 q = { p.xz().length(), p.y };
 
-	RmF cax = qx - math::min(qx, select(comp_lt(qy, 0.0f), (RmF)r1, (RmF)r2));
-	RmF cay = math::abs(qy) - h;
+	RmV2 ca = {
+		q.x - math::min(q.x, select(comp_lt(q.y, 0.0f), (RmF)r1, (RmF)r2)),
+		math::abs(q.y) - h,
+	};
 
-	RmF t   = saturate(((k1x - qx) * k2x + (k1y - qy) * k2y) * inv_k);
-	RmF cbx = qx - k1x + t * k2x;
-	RmF cby = qy - k1y + t * k2y;
+	RmF  t  = saturate((v2_from(k1) - q).dot(v2_from(k2)) * inv_k);
+	RmV2 cb = q - v2_from(k1) + v2_from(k2) * t;
 
-	RmM inside = comp_lt(cbx, 0.0f) & comp_lt(cay, 0.0f);
+	RmM inside = comp_lt(cb.x, 0.0f) & comp_lt(ca.y, 0.0f);
 	RmF s      = select(inside, (RmF)(-1.0f), (RmF)1.0f);
 
-	return to_sd(s * math::sqrt(math::min(cax * cax + cay * cay, cbx * cbx + cby * cby)));
+	return to_sd(s * math::sqrt(math::min(ca.length_sq(), cb.length_sq())));
 }
 
 fn RmSd sd_vertical_capsule(RmV3 p, float h, float r) @inline
 {
 	RmF  y = p.y - math::clamp(p.y, (RmF)0.0f, (RmF)h);
 	RmV3 q = { p.x, y, p.z };
-	return to_sd(q.length() - (RmF)r);
+	return to_sd(q.length() - r);
 }
 
 fn RmSd sd_rounded_cylinder(RmV3 p, float ra, float rb, float h) @inline
 {
 	float a = ra - rb;
 	float b = h - rb;
-	return to_sd(rect2(len2(p.x, p.z) - a, math::abs(p.y) - b) - (RmF)rb);
+	return to_sd(rect2({ p.xz().length() - a, math::abs(p.y) - b }) - rb);
 }
 
 fn RmSd sd_octahedron(RmV3 p, float s) @inline
 {
 	RmV3 a = p.abs();
-	RmF  m = a.x + a.y + a.z - s;
+	RmF  m = a.sum() - s;
 
 	RmM c1    = comp_lt(a.x * 3.0f, m);
 	RmM c2    = comp_lt(a.y * 3.0f, m);
@@ -157,18 +154,15 @@ fn RmSd sd_octahedron(RmV3 p, float s) @inline
 	RmF qy = select(c1, a.y, select(c2, a.z, a.x));
 	RmF qz = select(c1, a.z, select(c2, a.x, a.y));
 
-	RmF k  = math::clamp((qz - qy + s) * 0.5f, (RmF)0.0f, (RmF)s);
-	RmF dy = qy - s + k;
-	RmF dz = qz - k;
-	RmF r  = math::sqrt(qx * qx + dy * dy + dz * dz);
+	RmF  k = math::clamp((qz - qy + s) * 0.5f, (RmF)0.0f, (RmF)s);
+	RmV3 d = { qx, qy - s + k, qz - k };
 
-	return to_sd(select(found, r, m * 0.57735027f));
+	return to_sd(select(found, d.length(), m * 0.57735027f));
 }
 
 fn RmSd sd_octahedron_bound(RmV3 p, float s) @inline
 {
-	RmV3 a = p.abs();
-	return to_sd((a.x + a.y + a.z - s) * 0.57735027f);
+	return to_sd((p.abs().sum() - s) * 0.57735027f);
 }
 
 fn RmSd sd_pyramid(RmV3 p, float h) @inline
@@ -177,26 +171,23 @@ fn RmSd sd_pyramid(RmV3 p, float h) @inline
 	float inv_m2 = 1.0f / m2;
 	float inv_t  = 1.0f / (m2 + 0.25f);
 
-	RmF ax = math::abs(p.x);
-	RmF az = math::abs(p.z);
-	RmF px = math::max(ax, az) - 0.5f;
-	RmF pz = math::min(ax, az) - 0.5f;
+	RmV2 ab = p.xz().abs();
+	RmF  px = ab.max() - 0.5f;
+	RmF  pz = ab.min() - 0.5f;
 
-	RmF qx = pz;
-	RmF qy = p.y * h - px * 0.5f;
-	RmF qz = px * h + p.y * 0.5f;
+	RmV3 q = { pz, p.y * h - px * 0.5f, px * h + p.y * 0.5f };
 
-	RmF s  = math::max(-qx, (RmF)0.0f);
-	RmF t  = saturate((qy - pz * 0.5f) * inv_t);
-	RmF a  = (qx + s) * (qx + s) * m2 + qy * qy;
-	RmF bx = qx + t * 0.5f;
-	RmF by = qy - t * m2;
+	RmF s  = math::max(-q.x, (RmF)0.0f);
+	RmF t  = saturate((q.y - pz * 0.5f) * inv_t);
+	RmF a  = (q.x + s) * (q.x + s) * m2 + q.y * q.y;
+	RmF bx = q.x + t * 0.5f;
+	RmF by = q.y - t * m2;
 	RmF b  = bx * bx * m2 + by * by;
 
-	RmM inside = comp_gt(math::min(qy, -qx * m2 - qy * 0.5f), 0.0f);
+	RmM inside = comp_gt(math::min(q.y, -q.x * m2 - q.y * 0.5f), 0.0f);
 	RmF d2     = select(inside, (RmF)0.0f, math::min(a, b));
 
-	return to_sd(math::sqrt((d2 + qz * qz) * inv_m2) * sgn(math::max(qz, -p.y)));
+	return to_sd(math::sqrt((d2 + q.z * q.z) * inv_m2) * sgn(math::max(q.z, -p.y)));
 }
 
 // h.x = radius, h.y = half height
@@ -206,21 +197,21 @@ fn RmSd sd_hex_prism(RmV3 p, Vec2 h) @inline
 	const float KY = 0.5f;
 	const float KZ = 0.57735f;
 
-	RmF px = math::abs(p.x);
-	RmF py = math::abs(p.y);
-	RmF pz = math::abs(p.z);
+	RmV3 a  = p.abs();
+	RmV2 k  = v2(KX, KY);
+	RmV2 xy = a.xy();
 
 	// p.xy -= 2 * min(dot(k.xy, p.xy), 0) * k.xy
-	RmF d = math::min(px * KX + py * KY, (RmF)0.0f) * 2.0f;
-	px = px - d * KX;
-	py = py - d * KY;
+	RmF d = math::min(xy.dot(k), (RmF)0.0f) * 2.0f;
+	xy = xy - k * d;
 
 	float lim = KZ * h.x;
-	RmF   cx  = math::clamp(px, (RmF)(-lim), (RmF)lim);
-	RmF   dx  = len2(px - cx, py - h.x) * sgn(py - h.x);
-	RmF   dy  = pz - h.y;
+	RmF   cx  = math::clamp(xy.x, (RmF)(-lim), (RmF)lim);
+	RmV2  e   = { xy.x - cx, xy.y - h.x };
+	RmF   dx  = e.length() * sgn(e.y);
+	RmF   dy  = a.z - h.y;
 
-	return to_sd(rect2(dx, dy));
+	return to_sd(rect2({ dx, dy }));
 }
 
 fn RmSd sd_tri_prism(RmV3 p, Vec2 h) @inline
@@ -233,11 +224,11 @@ fn RmSd sd_tri_prism(RmV3 p, Vec2 h) @inline
 fn RmSd sd_box_frame(RmV3 p, Vec3 b, float e) @inline
 {
 	RmV3 pp = p.abs() - v3_from(b);
-	RmV3 q  = { math::abs(pp.x + e) - e, math::abs(pp.y + e) - e, math::abs(pp.z + e) - e };
+	RmV3 q  = (pp + e).abs() - e;
 
-	RmF d0 = box3(pp.x, q.y, q.z);
-	RmF d1 = box3(q.x, pp.y, q.z);
-	RmF d2 = box3(q.x, q.y, pp.z);
+	RmF d0 = box3({ pp.x, q.y, q.z });
+	RmF d1 = box3({ q.x, pp.y, q.z });
+	RmF d2 = box3({ q.x, q.y, pp.z });
 
 	return to_sd(math::min(math::min(d0, d1), d2));
 }
@@ -248,16 +239,15 @@ fn RmSd sd_round_cone(RmV3 p, float r1, float r2, float h) @inline
 	float a  = math::sqrt(1.0f - b * b);
 	float ah = a * h;
 
-	RmF qx = len2(p.x, p.z);
-	RmF qy = p.y;
-	RmF k  = qy * a - qx * b;
+	RmV2 q = { p.xz().length(), p.y };
+	RmF  k = q.y * a - q.x * b;
 
 	RmM lo = comp_lt(k, 0.0f);
 	RmM hi = comp_gt(k, ah) & mask_not(lo);
 
-	RmF l   = len2(qx, select(hi, qy - h, qy));
-	RmF cap = l - select(hi, (RmF)r2, (RmF)r1);
-	RmF mid = qx * a + qy * b - r1;
+	RmV2 lq  = { q.x, select(hi, q.y - h, q.y) };
+	RmF  cap = lq.length() - select(hi, (RmF)r2, (RmF)r1);
+	RmF  mid = q.x * a + q.y * b - r1;
 
 	return to_sd(select(lo | hi, cap, mid));
 }
@@ -269,9 +259,10 @@ fn RmSd sd_capped_cylinder_ab(RmV3 p, Vec3 a, Vec3 b, float r) @inline
 	float inv     = 1.0f / baba;
 	float half_bb = baba * 0.5f;
 
-	RmV3 pa   = p - v3_from(a);
-	RmF  paba = pa.dot(v3_from(ba));
-	RmV3 v    = pa * (RmF)baba - v3_from(ba) * paba;
+	RmV3 vba  = v3_from(ba);
+	RmV3 pa   = p.at(a);
+	RmF  paba = pa.dot(vba);
+	RmV3 v    = pa * baba - vba * paba;
 
 	RmF x  = v.length() - r * baba;
 	RmF y  = math::abs(paba - half_bb) - half_bb;
@@ -293,8 +284,8 @@ fn RmSd sd_capped_cone_ab(RmV3 p, Vec3 a, Vec3 b, float ra, float rb) @inline
 	float inv_baba = 1.0f / baba;
 	float inv_k    = 1.0f / (rba * rba + baba);
 
-	RmV3 pa   = p - v3_from(a);
-	RmF  papa = pa.dot(pa);
+	RmV3 pa   = p.at(a);
+	RmF  papa = pa.length_sq();
 	RmF  paba = pa.dot(v3_from(ba)) * inv_baba;
 
 	RmF x   = math::sqrt(math::max(papa - paba * paba * baba, (RmF)0.0f));
@@ -320,14 +311,15 @@ fn RmSd sd_round_cone_ab(RmV3 p, Vec3 a, Vec3 b, float r1, float r2) @inline
 	float il2 = 1.0f / l2;
 	float kk  = sgnf(rr) * rr * rr;
 
-	RmV3 pa = p - v3_from(a);
-	RmF  y  = pa.dot(v3_from(ba));
-	RmF  z  = y - l2;
-	RmV3 v  = pa * (RmF)l2 - v3_from(ba) * y;
-	RmF  x2 = v.dot(v);
-	RmF  y2 = y * y * l2;
-	RmF  z2 = z * z * l2;
-	RmF  k  = x2 * kk;
+	RmV3 vba = v3_from(ba);
+	RmV3 pa  = p.at(a);
+	RmF  y   = pa.dot(vba);
+	RmF  z   = y - l2;
+	RmV3 v   = pa * l2 - vba * y;
+	RmF  x2  = v.length_sq();
+	RmF  y2  = y * y * l2;
+	RmF  z2  = z * z * l2;
+	RmF  k   = x2 * kk;
 
 	RmM m1 = comp_gt(sgn(z) * z2 * a2, k);
 	RmM m2 = comp_lt(sgn(y) * y2 * a2, k) & mask_not(m1);
@@ -341,31 +333,33 @@ fn RmSd sd_round_cone_ab(RmV3 p, Vec3 a, Vec3 b, float r1, float r2) @inline
 
 fn RmSd sd_cone_infinite(RmV3 p, Vec2 c) @inline
 {
-	RmF qx = len2(p.x, p.z);
-	RmF qy = -p.y;
+	RmV2 q  = { p.xz().length(), -p.y };
+	RmV2 vc = v2_from(c);
 
-	RmF t   = math::max(qx * c.x + qy * c.y, (RmF)0.0f);
-	RmF d   = len2(qx - t * c.x, qy - t * c.y);
-	RmM neg = comp_lt(qx * c.y - qy * c.x, 0.0f);
+	RmF t   = math::max(q.dot(vc), (RmF)0.0f);
+	RmF d   = (q - vc * t).length();
+	RmM neg = comp_lt(q.cross(vc), 0.0f);
 
 	return to_sd(select(neg, -d, d));
 }
 
 fn RmSd sd_capped_torus(RmV3 p, Vec2 sc, float ra, float rb) @inline
 {
-	RmF px = math::abs(p.x);
-	RmM m  = comp_gt(px * sc.y, p.y * sc.x);
-	RmF k  = select(m, px * sc.x + p.y * sc.y, len2(px, p.y));
-	RmF d2 = px * px + p.y * p.y + p.z * p.z + ra * ra - k * (2.0f * ra);
+	RmV3 q  = { math::abs(p.x), p.y, p.z };
+	RmV2 xy = q.xy();
 
-	return to_sd(math::sqrt(max0(d2)) - (RmF)rb);
+	RmM m  = comp_gt(q.x * sc.y, q.y * sc.x);
+	RmF k  = select(m, xy.dot(v2_from(sc)), xy.length());
+	RmF d2 = q.length_sq() + ra * ra - k * (2.0f * ra);
+
+	return to_sd(math::sqrt(max0(d2)) - rb);
 }
 
 fn RmSd sd_link(RmV3 p, float le, float r1, float r2) @inline
 {
-	RmF qy = max0(math::abs(p.y) - le);
-	RmF l  = len2(p.x, qy) - r1;
-	return to_sd(len2(l, p.z) - (RmF)r2);
+	RmV2 q = { p.x, max0(math::abs(p.y) - le) };
+	RmV2 w = { q.length() - r1, p.z };
+	return to_sd(w.length() - r2);
 }
 
 fn RmSd sd_cut_sphere(RmV3 p, float r, float h) @inline
@@ -373,43 +367,41 @@ fn RmSd sd_cut_sphere(RmV3 p, float r, float h) @inline
 	float w  = math::sqrt(r * r - h * h);
 	float w2 = w * w;
 
-	RmF qx = len2(p.x, p.z);
-	RmF qy = p.y;
+	RmV2 q = { p.xz().length(), p.y };
 
-	RmF s = math::max(qx * qx * (h - r) + ((RmF)(h + r) - qy * 2.0f) * w2, qx * h - qy * w);
+	RmF s = math::max(q.x * q.x * (h - r) + ((RmF)(h + r) - q.y * 2.0f) * w2, q.x * h - q.y * w);
 
 	RmM near = comp_lt(s, 0.0f);
-	RmM side = comp_lt(qx, w);
+	RmM side = comp_lt(q.x, w);
 	RmM far  = mask_not(near) & mask_not(side);
 
-	RmF l = len2(select(far, qx - w, qx), select(far, qy - h, qy));
+	RmF l = select2(far, q - v2(w, h), q).length();
 
-	return to_sd(select(near, l - r, select(side, (RmF)h - qy, l)));
+	return to_sd(select(near, l - r, select(side, (RmF)h - q.y, l)));
 }
 
 fn RmSd sd_cut_hollow_sphere(RmV3 p, float r, float h, float t) @inline
 {
 	float w = math::sqrt(r * r - h * h);
 
-	RmF qx = len2(p.x, p.z);
-	RmF qy = p.y;
+	RmV2 q = { p.xz().length(), p.y };
 
-	RmM m = comp_lt(qx * h, qy * w);
-	RmF l = len2(select(m, qx - w, qx), select(m, qy - h, qy));
+	RmM m = comp_lt(q.x * h, q.y * w);
+	RmF l = select2(m, q - v2(w, h), q).length();
 
-	return to_sd(select(m, l, math::abs(l - r)) - (RmF)t);
+	return to_sd(select(m, l, math::abs(l - r)) - t);
 }
 
 fn RmSd sd_solid_angle(RmV3 p, Vec2 c, float ra) @inline
 {
-	RmF qx = len2(p.x, p.z);
-	RmF qy = p.y;
+	RmV2 q  = { p.xz().length(), p.y };
+	RmV2 vc = v2_from(c);
 
-	RmF l = len2(qx, qy) - ra;
-	RmF t = math::clamp(qx * c.x + qy * c.y, (RmF)0.0f, (RmF)ra);
-	RmF m = len2(qx - t * c.x, qy - t * c.y);
+	RmF l = q.length() - ra;
+	RmF t = math::clamp(q.dot(vc), (RmF)0.0f, (RmF)ra);
+	RmF m = (q - vc * t).length();
 
-	return to_sd(math::max(l, m * sgn(qx * c.y - qy * c.x)));
+	return to_sd(math::max(l, m * sgn(q.cross(vc))));
 }
 
 fn RmSd sd_vesica_segment(RmV3 p, Vec3 a, Vec3 b, float w) @inline
@@ -421,18 +413,17 @@ fn RmSd sd_vesica_segment(RmV3 p, Vec3 a, Vec3 b, float w) @inline
 	float r  = l * 0.5f;
 	float d  = 0.5f * (r * r - w * w) / w;
 
-	RmV3 pc = p - v3_from(c);
-	RmF  y  = pc.dot(v3_from(v));
-	RmV3 e  = pc - v3_from(v) * y;
-	RmF  qx = e.length();
-	RmF  qy = math::abs(y);
+	RmV3 vv = v3_from(v);
+	RmV3 pc = p.at(c);
+	RmF  y  = pc.dot(vv);
+	RmV3 e  = pc - vv * y;
+	RmV2 q  = { e.length(), math::abs(y) };
 
-	RmM m  = comp_lt(qx * r, (qy - r) * d);
-	RmF hx = select(m, (RmF)0.0f, (RmF)(-d));
-	RmF hy = select(m, (RmF)r, (RmF)0.0f);
-	RmF hz = select(m, (RmF)0.0f, (RmF)(d + w));
+	RmM  m  = comp_lt(q.x * r, (q.y - r) * d);
+	RmV2 hv = { select(m, (RmF)0.0f, (RmF)(-d)), select(m, (RmF)r, (RmF)0.0f) };
+	RmF  hz = select(m, (RmF)0.0f, (RmF)(d + w));
 
-	return to_sd(len2(qx - hx, qy - hy) - hz);
+	return to_sd((q - hv).length() - hz);
 }
 
 fn RmSd sd_rhombus(RmV3 p, float la, float lb, float h, float ra) @inline
@@ -442,13 +433,12 @@ fn RmSd sd_rhombus(RmV3 p, float la, float lb, float h, float ra) @inline
 	RmV3 a = p.abs();
 	RmF  f = saturate((a.x * la - a.z * lb + lb * lb) * inv);
 
-	RmF wx = a.x - f * la;
-	RmF wz = a.z - ((RmF)1.0f - f) * lb;
+	RmV2 w = { a.x - f * la, a.z - ((RmF)1.0f - f) * lb };
 
-	RmF qx = len2(wx, wz) * sgn(wx) - ra;
+	RmF qx = w.length() * sgn(w.x) - ra;
 	RmF qy = a.y - h;
 
-	return to_sd(rect2(qx, qy));
+	return to_sd(rect2({ qx, qy }));
 }
 
 fn RmSd sd_death_star(RmV3 p, float ra, float rb, float d) @inline
@@ -456,17 +446,16 @@ fn RmSd sd_death_star(RmV3 p, float ra, float rb, float d) @inline
 	float a = (ra * ra - rb * rb + d * d) / (2.0f * d);
 	float b = math::sqrt(math::max(ra * ra - a * a, 0.0f));
 
-	RmF px = p.x;
-	RmF py = len2(p.y, p.z);
+	RmV2 q = { p.x, p.yz().length() };
 
-	RmM m = comp_gt(px * b - py * a, math::max((RmF)b - py, (RmF)0.0f) * d);
+	RmM m = comp_gt(q.x * b - q.y * a, math::max((RmF)b - q.y, (RmF)0.0f) * d);
 
 	RmF res = (RmF)0.0f;
-	if (m.or()) res = len2(px - a, py - b);
+	if (m.or()) res = (q - v2(a, b)).length();
 	if (!m.and())
 	{
-		RmF l1 = len2(px, py) - ra;
-		RmF l2 = rb - len2(px - d, py);
+		RmF l1 = q.length() - ra;
+		RmF l2 = rb - (q - v2(d, 0.0f)).length();
 		res = select(m, res, math::max(l1, l2));
 	}
 	return to_sd(res);
@@ -488,9 +477,9 @@ fn RmSd ud_triangle(RmV3 p, Vec3 a, Vec3 b, Vec3 c) @inline
 	float inv_ac  = 1.0f / ac.dot(ac);
 	float inv_nor = 1.0f / nor.dot(nor);
 
-	RmV3 pa = p - v3_from(a);
-	RmV3 pb = p - v3_from(b);
-	RmV3 pc = p - v3_from(c);
+	RmV3 pa = p.at(a);
+	RmV3 pb = p.at(b);
+	RmV3 pc = p.at(c);
 
 	RmF s = sgn(pa.dot(v3_from(u1))) + sgn(pb.dot(v3_from(u2))) + sgn(pc.dot(v3_from(u3)));
 	RmM edge = comp_lt(s, 2.0f);
@@ -525,10 +514,10 @@ fn RmSd ud_quad(RmV3 p, Vec3 a, Vec3 b, Vec3 c, Vec3 d) @inline
 	float inv_ad  = 1.0f / ad.dot(ad);
 	float inv_nor = 1.0f / nor.dot(nor);
 
-	RmV3 pa = p - v3_from(a);
-	RmV3 pb = p - v3_from(b);
-	RmV3 pc = p - v3_from(c);
-	RmV3 pd = p - v3_from(d);
+	RmV3 pa = p.at(a);
+	RmV3 pb = p.at(b);
+	RmV3 pc = p.at(c);
+	RmV3 pd = p.at(d);
 
 	RmF s = sgn(pa.dot(v3_from(u1))) + sgn(pb.dot(v3_from(u2))) + sgn(pc.dot(v3_from(u3))) + sgn(pd.dot(v3_from(u4)));
 	RmM edge = comp_lt(s, 3.0f);
@@ -629,27 +618,21 @@ fn RmF max0(RmF x) @local @inline
 	return math::max(x, (RmF)0.0f);
 }
 
-fn RmF len2(RmF x, RmF y) @local @inline
+// 2D box distance: d = (|p| - half extents)
+fn RmF rect2(RmV2 d) @local @inline
 {
-	return math::sqrt(x * x + y * y);
+	return math::min(d.max(), (RmF)0.0f) + d.max_each(0.0f).length();
 }
 
-fn RmF rect2(RmF dx, RmF dy) @local @inline
+// 3D box distance: q = (|p| - half extents)
+fn RmF box3(RmV3 q) @local @inline
 {
-	return math::min(math::max(dx, dy), (RmF)0.0f) + len2(max0(dx), max0(dy));
-}
-
-fn RmF box3(RmF a, RmF b, RmF c) @local @inline
-{
-	RmF ma = max0(a);
-	RmF mb = max0(b);
-	RmF mc = max0(c);
-	return math::min(math::max(a, math::max(b, c)), (RmF)0.0f) + math::sqrt(ma * ma + mb * mb + mc * mc);
+	return math::min(q.max(), (RmF)0.0f) + q.max_each(0.0f).length();
 }
 
 fn RmF edge_d2(RmV3 pe, Vec3 e, float inv_ee) @local @inline
 {
-	RmF  t = saturate(pe.dot(v3_from(e)) * inv_ee);
-	RmV3 d = v3_from(e) * t - pe;
-	return d.dot(d);
+	RmV3 ve = v3_from(e);
+	RmF  t  = saturate(pe.dot(ve) * inv_ee);
+	return (ve * t - pe).length_sq();
 }

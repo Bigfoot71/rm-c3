@@ -52,12 +52,12 @@ fn RmV3 shade(RmRays ray, RmHits hits, float cone)
 	RmLit lit   = rm::@light_dir(rm::diffuse_burley, rm::specular_ggx, b, SUN, rm::v3(1.0f, 0.9f, 0.75f) * (RmF)1.6f, shadow);
 	RmV3 ambient = rm::get_ambient(s.n, rm::v3(0.25f, 0.35f, 0.55f), rm::v3(0.15f, 0.12f, 0.1f), ao);
 
-	RmV3 col = lit.apply(albedo) + albedo.mul(ambient);
+	RmV3 col = lit.apply(albedo) + albedo * ambient;
 
 	// Reflections
 	RmReflect refl = rm::get_reflection(&scene, s, b, s.hit, cone * 4.0f);
 	RmV3 rc = rm::@reflection(reflect_hit, sky_color, refl);
-	col = col.mix(rc, rm::get_reflectivity(b, ao));
+	col = col.lerp(rc, rm::get_reflectivity(b, ao));
 
 	// Fog
 	col = rm::fog_simple(col, rm::v3(0.75f, 0.85f, 0.95f), hits.dist, 0.02f);
@@ -79,8 +79,8 @@ fn RmV3 albedo_of(RmI mat, RmV3 p)
 {
 	// checkerboard floor
 	RmF s   = math::floor(p.x) + math::floor(p.z);
-	RmF chk = s - math::floor(s * 0.5f) * 2.0f; // 0 ou 1
-	RmV3 c  = rm::v3(0.1f, 0.1f, 0.1f).mix(rm::v3(0.8f, 0.8f, 0.8f), chk);
+	RmF chk = s - math::floor(s * 0.5f) * 2.0f; // 0 or 1
+	RmV3 c  = rm::v3(0.1f, 0.1f, 0.1f).lerp(rm::v3(0.8f, 0.8f, 0.8f), chk);
 
 	c = rm::select3(mat.comp_eq((RmI)MAT_MIRROR), rm::v3(0.02f, 0.02f, 0.02f), c);
 	c = rm::select3(mat.comp_eq((RmI)MAT_RED),    rm::v3(0.8f, 0.1f, 0.1f),    c);

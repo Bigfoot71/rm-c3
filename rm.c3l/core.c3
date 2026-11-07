@@ -144,8 +144,8 @@ fn RmRays pixel_rays(RmF cx, float cy) @local @inline
 	RmF   px = cx * (2.0f / (float)ctx.w) - 1.0f;
 	float py = 1.0f - cy * (2.0f / (float)ctx.h);
 
-	RmV3 dir = ctx.fwd + ctx.right_s * px + ctx.up_s.mulf(py);
-	return { .origin = ctx.cam_pos, .dir = dir.normalized() };
+	RmV3 dir = ctx.fwd + ctx.right_s * px + ctx.up_s * py;
+	return { .origin = ctx.cam_pos, .dir = dir.normalize() };
 }
 
 fn void store_packet(int x, int y, RmV3 color) @private @inline

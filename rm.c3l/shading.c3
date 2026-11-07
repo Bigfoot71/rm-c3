@@ -33,7 +33,7 @@ struct RmBrdf
 
 fn RmBrdf get_brdf(RmSurface s, RmRays ray, RmF rough, RmF f0) @inline
 {
-	RmV3 v = ray.dir * (RmF)(-1.0f);
+	RmV3 v = -ray.dir;
 	RmF  r = saturate(rough);
 
 	return {
@@ -48,7 +48,7 @@ fn RmBrdf get_brdf(RmSurface s, RmRays ray, RmF rough, RmF f0) @inline
 
 fn RmV3 get_reflect_dir(RmBrdf b) @inline
 {
-	return b.n * (b.n.dot(b.v) * 2.0f) - b.v;
+	return (-b.v).reflect(b.n);
 }
 
 // ================================
@@ -62,7 +62,7 @@ fn RmF diffuse_lambert(RmBrdf b, RmV3 l) @inline
 
 fn RmF diffuse_burley(RmBrdf b, RmV3 l) @inline
 {
-	RmV3 h    = (b.v + l).normalized();
+	RmV3 h    = (b.v + l).normalize();
 	RmF  ndl  = saturate(b.n.dot(l));
 	RmF  ldh  = saturate(l.dot(h));
 	RmF  fd90 = (RmF)0.5f + ldh * ldh * b.rough * 2.0f;
@@ -78,7 +78,7 @@ fn RmF diffuse_burley(RmBrdf b, RmV3 l) @inline
 
 fn RmF specular_blinn_phong(RmBrdf b, RmV3 l) @inline
 {
-	RmV3 h   = (b.v + l).normalized();
+	RmV3 h   = (b.v + l).normalize();
 	RmF  ndl = saturate(b.n.dot(l));
 	RmF  ndh = saturate(b.n.dot(h));
 	RmF  vdh = saturate(b.v.dot(h));
@@ -87,13 +87,13 @@ fn RmF specular_blinn_phong(RmBrdf b, RmV3 l) @inline
 	RmF p    = (RmF)2.0f / a2 - 2.0f;
 	RmF norm = (p + 8.0f) * 0.125f;
 
-	return fpow(ndh, p) * norm * fresnel_schlick(vdh, b.f0) * ndl;
+	return pow(ndh, p) * norm * fresnel_schlick(vdh, b.f0) * ndl;
 }
 
 // GGX (Trowbridge-Reitz) + height-correlated Smith visibility (approx) + Schlick
 fn RmF specular_ggx(RmBrdf b, RmV3 l) @inline
 {
-	RmV3 h   = (b.v + l).normalized();
+	RmV3 h   = (b.v + l).normalize();
 	RmF  ndl = saturate(b.n.dot(l));
 	RmF  ndh = saturate(b.n.dot(h));
 	RmF  vdh = saturate(b.v.dot(h));
@@ -102,7 +102,7 @@ fn RmF specular_ggx(RmBrdf b, RmV3 l) @inline
 	RmF dd = ndh * ndh * (a2 - 1.0f) + 1.0f;
 	RmF dist = a2 / (dd * dd);
 
-	RmF vis_den = mix(ndl * b.ndv * 2.0f, ndl + b.ndv, b.a);
+	RmF vis_den = lerp(ndl * b.ndv * 2.0f, ndl + b.ndv, b.a);
 	RmF vis     = (RmF)0.5f / math::max(vis_den, (RmF)1e-5f);
 
 	return dist * vis * fresnel_schlick(vdh, b.f0) * ndl;
@@ -125,13 +125,14 @@ fn RmLit RmLit.add(self, RmLit o) @operator(+) @inline
 
 fn RmV3 RmLit.apply(self, RmV3 albedo) @inline
 {
-	return self.diff.mul(albedo) + self.spec;
+	return self.diff * albedo + self.spec;
 }
 
 fn RmF point_atten(RmF d2, float range) @inline
 {
 	RmF r2 = (RmF)(range * range);
-	RmF q  = saturate((RmF)1.0f - (d2 / r2) * (d2 / r2));
+	RmF x  = d2 / r2;
+	RmF q  = saturate((RmF)1.0f - x * x);
 	return q * q / (d2 + 1.0f);
 }
 
@@ -146,7 +147,7 @@ macro RmLit @light_dir(#diff, #spec, RmBrdf b, Vec3 dir, RmV3 color, RmF shadow)
 macro RmLit @light_point(#diff, #spec, RmBrdf b, RmV3 pos, Vec3 light_pos, RmV3 color, float range, RmF shadow)
 {
 	RmV3 to = v3_from(light_pos) - pos;
-	RmF  d2 = math::max(to.dot(to), (RmF)1e-6f);
+	RmF  d2 = math::max(to.length_sq(), (RmF)1e-6f);
 	RmV3 l  = to * ((RmF)1.0f / math::sqrt(d2));
 	RmF  k  = point_atten(d2, range) * shadow;
 
@@ -156,10 +157,10 @@ macro RmLit @light_point(#diff, #spec, RmBrdf b, RmV3 pos, Vec3 light_pos, RmV3 
 macro RmLit @light_spot(#diff, #spec, RmBrdf b, RmV3 pos, Vec3 light_pos, Vec3 axis, float cos_inner, float cos_outer, RmV3 color, float range, RmF shadow)
 {
 	RmV3 to = v3_from(light_pos) - pos;
-	RmF  d2 = math::max(to.dot(to), (RmF)1e-6f);
+	RmF  d2 = math::max(to.length_sq(), (RmF)1e-6f);
 	RmV3 l  = to * ((RmF)1.0f / math::sqrt(d2));
 
-	RmF cd   = (RmF)0.0f - l.dot(v3_from(axis));
+	RmF cd   = -l.dot(v3_from(axis));
 	RmF cone = smoothstep(cos_outer, cos_inner, cd);
 	RmF k    = point_atten(d2, range) * cone * shadow;
 
@@ -206,7 +207,7 @@ fn RmF get_shadow(RmSceneFn scene, RmSurface s, Vec3 light, RmM live, float tmin
 fn RmV3 get_ambient(RmV3 n, RmV3 sky, RmV3 ground, RmF ao) @inline
 {
 	RmF t = n.y * 0.5f + 0.5f;
-	return ground.mix(sky, t) * ao;
+	return ground.lerp(sky, t) * ao;
 }
 
 // 1 = open, 0 = fully occluded
@@ -218,7 +219,7 @@ fn RmF get_ambient_occlusion(RmSceneFn scene, RmSurface s, float strength = 3.0f
 	for (int i = 0; i < max_steps; i++)
 	{
 		float h = 0.01f + 0.12f * (float)i / (float)(max_steps - 1);
-		RmF    d = scene(s.pos + s.n * (RmF)h).d;
+		RmF   d = scene(s.pos + s.n * h).d;
 		occ += ((RmF)h - d) * sca;
 		sca *= 0.95f;
 	}
@@ -228,7 +229,7 @@ fn RmF get_ambient_occlusion(RmSceneFn scene, RmSurface s, float strength = 3.0f
 fn RmF get_specular_occlusion(RmBrdf b, RmF ao) @inline
 {
 	RmF e = math::exp((b.rough * (-16.0f) - 1.0f) * 0.6931472f); // 2^(-16 * rough - 1)
-	return saturate(fpow(b.ndv + ao, e) - 1.0f + ao);
+	return saturate(pow(b.ndv + ao, e) - 1.0f + ao);
 }
 
 fn RmF get_reflectivity(RmBrdf b, RmF ao) @inline
@@ -243,15 +244,15 @@ fn RmF get_reflectivity(RmBrdf b, RmF ao) @inline
 fn RmV3 sky_gradient(RmV3 dir, RmV3 horizon, RmV3 top, float sharpness = 1.0f) @inline
 {
 	RmF t = saturate(dir.y);
-	if (sharpness != 1.0f) t = fpow(t, (RmF)sharpness);
-	return horizon.mix(top, t);
+	if (sharpness != 1.0f) t = pow(t, (RmF)sharpness);
+	return horizon.lerp(top, t);
 }
 
 fn RmV3 sky_sun(RmV3 dir, Vec3 sun_dir, RmV3 color, float disc_cos = 0.9995f, float halo_power = 48.0f, float disc_gain = 4.0f) @inline
 {
 	RmF c    = saturate(dir.dot(v3_from(sun_dir)));
 	RmF disc = smoothstep(disc_cos - (1.0f - disc_cos) * 0.5f, disc_cos, c);
-	RmF halo = fpow(c, (RmF)halo_power) * 0.25f;
+	RmF halo = pow(c, (RmF)halo_power) * 0.25f;
 
 	return color * (disc * disc_gain + halo);
 }
@@ -263,7 +264,7 @@ fn RmV3 sky_sun(RmV3 dir, Vec3 sun_dir, RmV3 color, float disc_cos = 0.9995f, fl
 fn RmV3 fog_simple(RmV3 col, RmV3 fog_col, RmF dist, float density) @inline
 {
 	RmF f = (RmF)1.0f - math::exp(dist * (-density));
-	return col.mix(fog_col, f);
+	return col.lerp(fog_col, f);
 }
 
 fn RmV3 fog_full(RmV3 col, RmV3 fog_col, RmV3 sun_col, RmRays ray, RmF dist, Vec3 sun_dir, float density, float falloff, float sun_power = 8.0f) @inline
@@ -279,10 +280,10 @@ fn RmV3 fog_full(RmV3 col, RmV3 fog_col, RmV3 sun_col, RmRays ray, RmF dist, Vec
 	RmF amount = integral * (density * math::exp(-ray.origin.y * falloff));
 	RmF f      = (RmF)1.0f - math::exp(-amount);
 
-	RmF  sd  = saturate(ray.dir.dot(v3_from(sun_dir)));
-	RmV3 tint = fog_col.mix(sun_col, fpow(sd, (RmF)sun_power));
+	RmF  sd   = saturate(ray.dir.dot(v3_from(sun_dir)));
+	RmV3 tint = fog_col.lerp(sun_col, pow(sd, (RmF)sun_power));
 
-	return col.mix(tint, f);
+	return col.lerp(tint, f);
 }
 
 // ================================
@@ -327,9 +328,9 @@ fn RmF get_thinness(RmSceneFn scene, RmSurface s, float depth = 0.4f, int steps 
 	for (int i = 0; i < steps; i++)
 	{
 		float h = depth * (float)(i + 1) / (float)steps;
-		RmF   d = scene(s.pos - s.n * (RmF)h).d;
+		RmF   d = scene(s.pos - s.n * h).d;
 
-		sum += saturate((d + (RmF)h) * (RmF)(1.0f / h));
+		sum += saturate((d + h) * (1.0f / h));
 	}
 	return sum * (1.0f / (float)steps);
 }
@@ -338,10 +339,10 @@ fn RmF get_thinness(RmSceneFn scene, RmSurface s, float depth = 0.4f, int steps 
 fn RmV3 get_translucency(RmBrdf b, Vec3 light, RmV3 color, RmF thin, float distortion = 0.3f, float power = 4.0f, float scale = 1.0f) @inline
 {
 	RmV3 l   = v3_from(light);
-	RmV3 h   = (l + b.n * (RmF)distortion).normalized();
-	RmF  vdh = saturate((RmF)0.0f - b.v.dot(h));
+	RmV3 h   = (l + b.n * distortion).normalize();
+	RmF  vdh = saturate(-b.v.dot(h));
 
-	return color * (fpow(vdh, (RmF)power) * thin * scale);
+	return color * (pow(vdh, (RmF)power) * thin * scale);
 }
 
 // ================================

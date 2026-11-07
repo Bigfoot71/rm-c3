@@ -44,7 +44,7 @@ fn RmV3 get_normal(RmSceneFn scene, RmV3 p, RmF eps) @inline
 		-s0.d - s1.d + s2.d + s3.d,
 		-s0.d + s1.d - s2.d + s3.d,
 	};
-	return n.normalized();
+	return n.normalize();
 }
 
 fn RmV3 get_heat(RmF t) @inline

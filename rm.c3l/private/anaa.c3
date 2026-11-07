@@ -28,7 +28,7 @@ fn RmV3 anaa_resolve(RmV3 color, RmRays rays, RmHits hits, TileArgs* args) @inli
 
 		RmV3 gc    = args.shade(rays, gh, args.cone);
 		RmF  c     = hits.gz_cov;
-		RmV3 mixed = color.mix(gc, c);
+		RmV3 mixed = color.lerp(gc, c);
 
 		color = select3(edge, mixed, color);
 	}
