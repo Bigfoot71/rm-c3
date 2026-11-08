@@ -131,6 +131,8 @@ fn int main(String[] args)
 	rm::init(WIN_W, WIN_H);
 	defer rm::quit();
 
+	rm::set_taa(1.0f, 0.5f);
+
 	RLTexture rt = {
 		.id      = rl::gl_load_texture(null, WIN_W, WIN_H, (int)RLPixelFormat.UNCOMPRESSED_R8G8B8A8, 1),
 		.width   = WIN_W,
