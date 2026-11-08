@@ -26,6 +26,17 @@ alias RmM = bool  [<LANES>]; // one bool per lane (comparison result)
 // Per-lane choice: m ? a : b  (see select2 and select3 for vectors)
 macro select(RmM m, a, b) => math::select(m, a, b);
 
+macro RmF gather(float* table, RmI id)
+{
+	RmF r;
+
+	$for int $i = 0; $i < LANES; $i++:
+		r[$i] = table[id[$i]];
+	$endfor
+
+	return r;
+}
+
 macro RmM comp_lt(a, b) => a.comp_lt(($Typeof(a))b);
 macro RmM comp_le(a, b) => a.comp_le(($Typeof(a))b);
 macro RmM comp_eq(a, b) => a.comp_eq(($Typeof(a))b);

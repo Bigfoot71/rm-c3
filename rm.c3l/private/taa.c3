@@ -20,13 +20,18 @@ const float TAA_REST_REJECT = 0.0f;    // same once settled at rest (0 = never r
 
 fn void taa_init(int w, int h)
 {
-	sz n = (sz)w * h * float[<4>]::size;
-	ctx.curr      = ((float[<4>]*)mem::calloc_aligned(n, CACHE_LINE))[:w*h];
-	ctx.hist      = ((float[<4>]*)mem::calloc_aligned(n, CACHE_LINE))[:w*h];
-	ctx.hist_prev = ((float[<4>]*)mem::calloc_aligned(n, CACHE_LINE))[:w*h];
+	ctx.w      = w;
+	ctx.h      = h;
+	ctx.stride = w + LANES;
 
-	ctx.w = w;
-	ctx.h = h;
+	// One block of 3 buffers (curr, hist, hist_prev) x 4 planes (r, g, b, a)
+	sz     n = (sz)ctx.stride * h + 2 * LANES;
+	float* m = mem::calloc_aligned(n * 12 * float::size, CACHE_LINE);
+	m += LANES;
+
+	ctx.curr      = { m,         m + n,      m + 2 * n,  m + 3 * n  };
+	ctx.hist      = { m + 4 * n, m + 5 * n,  m + 6 * n,  m + 7 * n  };
+	ctx.hist_prev = { m + 8 * n, m + 9 * n,  m + 10 * n, m + 11 * n };
 
 	ctx.motion      = 0.5f;
 	ctx.stability   = 1.0f;
@@ -43,9 +48,7 @@ fn void taa_init(int w, int h)
 
 fn void taa_quit()
 {
-	mem::free_aligned(ctx.hist_prev);
-	mem::free_aligned(ctx.hist);
-	mem::free_aligned(ctx.curr);
+	mem::free_aligned(ctx.curr.r - LANES);
 	ctx = {};
 }
 
@@ -67,7 +70,7 @@ fn Vec2 taa_jitter() @inline
 
 fn void taa_prepare(RmCamera camera)
 {
-	// The history written last frame is read this frame
+	// Last frame output is this frame input
 	@swap(ctx.hist, ctx.hist_prev);
 
 	float tan_half = camera.tan_half();
@@ -92,16 +95,28 @@ fn void taa_prepare(RmCamera camera)
 
 	ctx.still = moved ? 0 : math::min(ctx.still + 1, TAA_SAMPLES);
 
-	// Maximum history length for this frame
+	// No history after a reset, a short one while moving, a long one at rest
 	ctx.age_cap   = ctx.force_reset ? 0.0f : moved ? ctx.motion * TAA_AGE_MOVING : TAA_AGE_STILL;
-	ctx.reproject = moved && ctx.age_cap > 0.0f; // no history, nothing to reproject
+	ctx.reproject = moved && ctx.age_cap > 0.0f;
 
-	// Trust in the history (0 right after a motion, 1 once a full jitter cycle has been accumulated at rest)
+	// Goes from 0 right after a motion to 1 after a full jitter cycle at rest
 	ctx.rest = (float)ctx.still / (float)TAA_SAMPLES * ctx.stability;
 
-	// The jitter fades out with the history length (no history, no jitter)
+	// Fades out with the history length
 	ctx.jitter = ctx.jitter_seq[ctx.frame] * math::min(ctx.age_cap, 1.0f);
 	ctx.frame  = (ctx.frame + 1) % TAA_SAMPLES;
+
+	// Previous camera position is d + z * (f + gx * ndc_x + gy * ndc_y), with x and y already divided by the previous ax and ay
+	Vec3 pr = ctx.prev.right / ctx.prev.ax;
+	Vec3 pu = ctx.prev.up    / ctx.prev.ay;
+	Vec3 pf = ctx.prev.fwd;
+	Vec3 gx = ctx.cur.right * ctx.cur.ax;
+	Vec3 gy = ctx.cur.up    * ctx.cur.ay;
+
+	ctx.rp.d  = { ctx.dpos.dot(pr),    ctx.dpos.dot(pu),    ctx.dpos.dot(pf) };
+	ctx.rp.f  = { ctx.cur.fwd.dot(pr), ctx.cur.fwd.dot(pu), ctx.cur.fwd.dot(pf) };
+	ctx.rp.gx = { gx.dot(pr),          gx.dot(pu),          gx.dot(pf) };
+	ctx.rp.gy = { gy.dot(pr),          gy.dot(pu),          gy.dot(pf) };
 
 	ctx.force_reset = false;
 }
@@ -110,73 +125,173 @@ fn void taa_prepare(RmCamera camera)
 fn void taa_store(int x, int y, RmV3 c, RmF z) @inline
 {
 	RmV3 s = c.saturate();
-	int  i = y * ctx.w + x;
+	int  i = y * ctx.stride + x;
 
-	for (int l = 0; l < LANES; l++)
+	*(RmF*)&ctx.curr.r[i] = s.x;
+	*(RmF*)&ctx.curr.g[i] = s.y;
+	*(RmF*)&ctx.curr.b[i] = s.z;
+	*(RmF*)&ctx.curr.a[i] = z;
+
+	if (x == 0)
 	{
-		ctx.curr[i + l] = { s.x[l], s.y[l], s.z[l], z[l] };
+		ctx.curr.r[i - 1] = s.x[0];
+		ctx.curr.g[i - 1] = s.y[0];
+		ctx.curr.b[i - 1] = s.z[0];
+		ctx.curr.a[i - 1] = z[0];
+	}
+
+	if (x + LANES == ctx.w)
+	{
+		ctx.curr.r[i + LANES] = s.x[LANES - 1];
+		ctx.curr.g[i + LANES] = s.y[LANES - 1];
+		ctx.curr.b[i + LANES] = s.z[LANES - 1];
+		ctx.curr.a[i + LANES] = z[LANES - 1];
 	}
 }
 
 fn void taa_resolve_item(void* arg, int y)
 {
 	// Once settled at rest the history is exact (no box, no rejection)
-	bool  boxed  = ctx.rest < 1.0f;
-	float pad    = lerp(TAA_CLAMP_PAD, TAA_REST_PAD,    ctx.rest);
-	float reject = lerp(TAA_REJECT,    TAA_REST_REJECT, ctx.rest);
+	bool boxed  = ctx.rest < 1.0f;
+	RmF  pad    = (RmF)lerp(TAA_CLAMP_PAD, TAA_REST_PAD,    ctx.rest);
+	RmF  reject = (RmF)lerp(TAA_REJECT,    TAA_REST_REJECT, ctx.rest);
+	RmF  cap    = (RmF)ctx.age_cap;
+	RmF  one    = (RmF)1.0f;
+	RmF  zero   = (RmF)0.0f;
+
+	int[3] rows = {
+		math::max(y - 1, 0) * ctx.stride,
+		y * ctx.stride,
+		math::min(y + 1, ctx.h - 1) * ctx.stride,
+	};
+
+	// Row constants of the reprojection
+	float ndc_y = 1.0f - ((float)y + 0.5f) * (2.0f / (float)ctx.h);
+	Vec3  ky    = ctx.rp.f + ctx.rp.gy * ndc_y;
+	float hw    = 0.5f * (float)ctx.w;
+	float hh    = 0.5f * (float)ctx.h;
 
 	for (int x = 0; x < ctx.w; x += LANES)
 	{
-		RmV3 out;
+		int i = y * ctx.stride + x;
 
-		for (int l = 0; l < LANES; l++)
+		RmV3 c = {
+			*(RmF*)&ctx.curr.r[i],
+			*(RmF*)&ctx.curr.g[i],
+			*(RmF*)&ctx.curr.b[i],
+		};
+
+		RmV3 lo = c;
+		RmV3 hi = c;
+		RmF  zn = *(RmF*)&ctx.curr.a[i];
+
+		// Neighborhood box + closest depth
+		if (boxed)
 		{
-			int px = x + l;
-			int i  = y * ctx.w + px;
-
-			float[<4>] c4  = ctx.curr[i];
-			float[<3>] c   = c4.xyz;
-			float[<4>] h   = ctx.hist_prev[i];
-			float[<3>] hc  = h.xyz;
-			float      rej = 0.0f;
-
-			if (boxed)
+			for (int r = 0; r < 3; r++)
 			{
-				float[<3>] lo = c;
-				float[<3>] hi = c;
-				float      zn = c4[3];
-
-				// Neighborhood box + closest depth
-				for (int dy = -1; dy <= 1; dy++)
+				for (int dx = -1; dx <= 1; dx++)
 				{
-					int row = math::clamp(y + dy, 0, ctx.h - 1) * ctx.w;
+					int j = rows[r] + x + dx;
 
-					for (int dx = -1; dx <= 1; dx++)
-					{
-						float[<4>] n = ctx.curr[row + math::clamp(px + dx, 0, ctx.w - 1)];
-						lo = math::min(lo, n.xyz);
-						hi = math::max(hi, n.xyz);
-						zn = math::min(zn, n[3]);
-					}
+					RmV3 n = {
+						mem::load((RmF*)&ctx.curr.r[j], 4),
+						mem::load((RmF*)&ctx.curr.g[j], 4),
+						mem::load((RmF*)&ctx.curr.b[j], 4),
+					};
+
+					lo = lo.vmin(n);
+					hi = hi.vmax(n);
+					zn = math::min(zn, mem::load((RmF*)&ctx.curr.a[j], 4));
 				}
+			}
+		}
 
-				// Reprojected while the camera moves, same pixel otherwise
-				if (ctx.reproject) h = taa_history(px, y, zn);
+		RmV3 h;
+		RmF  hage;
 
-				hc = math::clamp(h.xyz, lo - pad, hi + pad);
+		// Reprojected while the camera moves, same pixel otherwise
+		if (ctx.reproject)
+		{
+			RmF ndc_x = ((RmF)x + lane_index() + 0.5f) * (2.0f / (float)ctx.w) - 1.0f;
 
-				float[<3>] d = h.xyz - hc;
-				rej = math::min(math::sqrt((d * d).sum()) * reject, 1.0f);
+			// Previous camera space position
+			RmF px = (ndc_x * ctx.rp.gx[0] + ky[0]) * zn + ctx.rp.d[0];
+			RmF py = (ndc_x * ctx.rp.gx[1] + ky[1]) * zn + ctx.rp.d[1];
+			RmF pz = (ndc_x * ctx.rp.gx[2] + ky[2]) * zn + ctx.rp.d[2];
+
+			RmM front = comp_ge(pz, 1e-4f);
+			RmF inv   = one / math::max(pz, (RmF)1e-4f);
+
+			// Continuous coordinates in pixel (center) space
+			RmF fx = math::clamp(px * inv * hw + (hw - 0.5f),         (RmF)-2.0f, (RmF)((float)ctx.w + 1.0f));
+			RmF fy = math::clamp((hh - 0.5f) - py * inv * hh,         (RmF)-2.0f, (RmF)((float)ctx.h + 1.0f));
+
+			RmF flx = fx.floor();
+			RmF fly = fy.floor();
+			RmF tx  = fx - flx;
+			RmF ty  = fy - fly;
+			RmI x0  = (RmI)flx;
+			RmI y0  = (RmI)fly;
+
+			RmV3 acc;
+			RmF  aacc;
+			RmF  wsum;
+
+			for (int jy = 0; jy < 2; jy++)
+			{
+				for (int jx = 0; jx < 2; jx++)
+				{
+					RmI sx = x0 + jx;
+					RmI sy = y0 + jy;
+
+					RmM ok = front
+						& comp_ge(sx, 0) & comp_lt(sx, ctx.w)
+						& comp_ge(sy, 0) & comp_lt(sy, ctx.h);
+
+					RmF wt = select(ok, (jx == 0 ? one - tx : tx) * (jy == 0 ? one - ty : ty), zero);
+
+					RmI idx = math::clamp(sy, (RmI)0, (RmI)(ctx.h - 1)) * ctx.stride
+					        + math::clamp(sx, (RmI)0, (RmI)(ctx.w - 1));
+
+					acc.x += gather(ctx.hist_prev.r, idx) * wt;
+					acc.y += gather(ctx.hist_prev.g, idx) * wt;
+					acc.z += gather(ctx.hist_prev.b, idx) * wt;
+					aacc  += gather(ctx.hist_prev.a, idx) * wt;
+					wsum  += wt;
+				}
 			}
 
-			float age = math::min(h[3], ctx.age_cap) * (1.0f - rej);
+			// Color renormalized over the valid taps
+			RmM good = comp_ge(wsum, 1e-3f);
+			RmF k    = select(good, one / math::max(wsum, (RmF)1e-3f), zero);
 
-			float[<3>] res = hc + (c - hc) * (1.0f / (age + 1.0f));
-
-			ctx.hist[i] = { res.x, res.y, res.z, math::min(age + 1.0f, ctx.age_cap) };
-
-			out.set_lane(l, res);
+			h    = acc * k;
+			hage = select(good, aacc, zero);
 		}
+		else
+		{
+			h = {
+				*(RmF*)&ctx.hist_prev.r[i],
+				*(RmF*)&ctx.hist_prev.g[i],
+				*(RmF*)&ctx.hist_prev.b[i],
+			};
+			hage = *(RmF*)&ctx.hist_prev.a[i];
+		}
+
+		// At rest the box is padded out (TAA_REST_PAD) and the rejection is null
+		RmV3 hc  = h.clamp(lo - pad, hi + pad);
+		RmF  rej = math::min((h - hc).length() * reject, one);
+
+		RmF  age = math::min(hage, cap) * (one - rej);
+		RmV3 res = hc + (c - hc) * (one / (age + one));
+
+		*(RmF*)&ctx.hist.r[i] = res.x;
+		*(RmF*)&ctx.hist.g[i] = res.y;
+		*(RmF*)&ctx.hist.b[i] = res.z;
+		*(RmF*)&ctx.hist.a[i] = math::min(age + one, cap);
+
+		RmV3 out = res;
 
 		$if RM_SRGB_OUTPUT:
 			out = linear_to_srgb(out);
@@ -193,62 +308,6 @@ fn void taa_resolve_item(void* arg, int y)
 // ================================
 // Local: TAA Functions
 // ================================
-
-fn float[<4>] taa_history(int px, int py, float z) @local
-{
-	const float[<4>] NONE = { 0.0f, 0.0f, 0.0f, 0.0f };
-
-	float ndc_x = ((float)px + 0.5f) * (2.0f / (float)ctx.w) - 1.0f;
-	float ndc_y = 1.0f - ((float)py + 0.5f) * (2.0f / (float)ctx.h);
-
-	// World point = current camera + ray * z
-	Vec3 dir = ctx.cur.fwd + ctx.cur.right * (ctx.cur.ax * ndc_x) + ctx.cur.up * (ctx.cur.ay * ndc_y);
-	Vec3 v   = ctx.dpos + dir * z;
-
-	// Into the previous camera
-	float zp = v.dot(ctx.prev.fwd);
-	if (zp < 1e-4f) return NONE;
-
-	float inv = 1.0f / zp;
-	float nx  = v.dot(ctx.prev.right) * inv / ctx.prev.ax;
-	float ny  = v.dot(ctx.prev.up)    * inv / ctx.prev.ay;
-
-	// Continuous coordinates in pixel (center) space
-	float fx = math::clamp((nx + 1.0f) * 0.5f * (float)ctx.w - 0.5f, -2.0f, (float)ctx.w + 1.0f);
-	float fy = math::clamp((1.0f - ny) * 0.5f * (float)ctx.h - 0.5f, -2.0f, (float)ctx.h + 1.0f);
-
-	float flx = math::floor(fx);
-	float fly = math::floor(fy);
-	int   x0  = (int)flx;
-	int   y0  = (int)fly;
-
-	float[2] wx = { 1.0f - (fx - flx), fx - flx };
-	float[2] wy = { 1.0f - (fy - fly), fy - fly };
-
-	float[<4>] acc  = NONE;
-	float      wsum = 0.0f;
-
-	for (int j = 0; j < 2; j++)
-	{
-		for (int i = 0; i < 2; i++)
-		{
-			int sx = x0 + i;
-			int sy = y0 + j;
-			if ((uint)sx >= (uint)ctx.w || (uint)sy >= (uint)ctx.h) continue;
-
-			float wt = wx[i] * wy[j];
-
-			acc  += ctx.hist_prev[sy * ctx.w + sx] * wt;
-			wsum += wt;
-		}
-	}
-
-	if (wsum < 1e-3f) return NONE;
-
-	// Color renormalized over the valid taps
-	float k = 1.0f / wsum;
-	return acc * (float[<4>]){ k, k, k, 1.0f };
-}
 
 fn float halton(int index, int base) @local
 {
@@ -267,19 +326,29 @@ fn float halton(int index, int base) @local
 // Local: TAA Context
 // ================================
 
+struct Planes @local
+{
+	float* r, g, b, a; // a = depth (curr) / age (hist)
+}
+
 struct TaaView @local
 {
 	Vec3  pos, fwd, right, up;
 	float ax, ay; // image plane half size at depth 1
 }
 
+struct TaaReproj @local
+{
+	Vec3 d, f, gx, gy; // (x, y, z) = previous right / up / forward axes
+}
+
 struct Context @local
 {
-	float[<4>][] curr;      // rgb + depth
-	float[<4>][] hist;      // rgb + age (written)
-	float[<4>][] hist_prev; // rgb + age (read)
+	Planes curr;      // rgb + depth
+	Planes hist;      // rgb + age (written)
+	Planes hist_prev; // rgb + age (read)
 
-	int w, h;
+	int w, h, stride;
 
 	Vec2[TAA_SAMPLES] jitter_seq;
 	Vec2  jitter;
@@ -293,8 +362,9 @@ struct Context @local
 	bool  reproject;
 	bool  force_reset;
 
-	TaaView cur, prev;
-	Vec3    dpos;      // cur.pos - prev.pos
+	TaaView   cur, prev;
+	TaaReproj rp;
+	Vec3      dpos;    // cur.pos - prev.pos
 }
 
 Context ctx @local;
