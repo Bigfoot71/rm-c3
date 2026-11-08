@@ -60,7 +60,7 @@ fn RmV3 shade(RmRays ray, RmHits hits, float cone)
 	col = col.lerp(rc, rm::get_reflectivity(b, ao));
 
 	// Fog
-	col = rm::fog_simple(col, rm::v3(0.75f, 0.85f, 0.95f), hits.dist, 0.02f);
+	col = rm::fog_simple(col, rm::v3(0.75f, 0.85f, 0.95f), hits.dist, 0.012f);
 
 	return rm::select3(hits.mask, col, sky);
 }
