@@ -31,6 +31,7 @@
       "sources":  [ "examples/scene.c3" ],
       "output": "build/scene",
       "debug-info": "none",
+      "x86cpu": "native",
       "optlevel": "max",
       "safe": false,
       "opt": "O3"
