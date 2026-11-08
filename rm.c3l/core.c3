@@ -18,7 +18,7 @@ const bool RM_TAA         = $feat(RM_TAA);
 
 const int LANES       @private = 8;
 const int TILE        @private = 16;
-const int THREADS     @private = env::WASM ? 5 : 0; // 0 = one per logical CPU
+const int THREADS     @private = env::WASM ? 4 : 0; // 0 = one per logical CPU
 const int CACHE_LINE  @private = 64;                // Color buffer alignment take a cache line so two threads never write the same one
 
 const float BEAM_SAFETY @private = 0.98f;
