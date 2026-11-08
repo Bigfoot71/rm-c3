@@ -35,7 +35,7 @@ fn RmSd scene(RmV3 p)
 fn RmV3 shade(RmRays ray, RmHits hits, float cone)
 {
 	RmV3 sky = sky_color(ray.dir);
-	if (!rm::mask_any(hits.mask)) return sky;
+	if (!rm::mask_any(hits.mask)) return tonemap_filmic(sky);
 
 	RmSurface s = rm::get_surface(&scene, hits, cone);
 
@@ -62,7 +62,7 @@ fn RmV3 shade(RmRays ray, RmHits hits, float cone)
 	// Fog
 	col = rm::fog_simple(col, rm::v3(0.75f, 0.85f, 0.95f), hits.dist, 0.012f);
 
-	return rm::select3(hits.mask, col, sky);
+	return tonemap_filmic(rm::select3(hits.mask, col, sky));
 }
 
 // ================================
@@ -94,6 +94,28 @@ fn RmV3 reflect_hit(RmReflect r)
 {
 	RmF ndl = rm::saturate(r.n.dot(rm::v3_from(SUN)));
 	return albedo_of(r.mat, r.pos) * (ndl * 0.8f + 0.2f);
+}
+
+// ================================
+// Tonemapping
+// ================================
+
+fn RmV3 tonemap_filmic(RmV3 c)
+{
+	const float EXPOSURE = 0.8f;
+	const float WHITE    = 1.2f;
+
+	const float A = 0.22f * EXPOSURE * EXPOSURE;
+	const float B = 0.30f * EXPOSURE;
+	const float C = 0.10f;
+	const float D = 0.20f;
+	const float E = 0.01f;
+	const float F = 0.30f;
+
+	RmV3  v = (c * (c * A + C * B) + D * E) / (c * (c * A + B) + D * F) - E / F;
+	float w = (WHITE * (A * WHITE + C * B) + D * E) / (WHITE * (A * WHITE + B) + D * F) - E / F;
+
+	return v * (1.0f / w);
 }
 
 // ================================
